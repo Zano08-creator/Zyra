@@ -489,7 +489,10 @@ async function askZyra(history) {
 }
 
 // Prova i modelli in ordine: se uno è lento, sovraccarico o non disponibile passa al successivo.
-const GEMINI_MODELS = [...new Set([GEMINI_MODEL, 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'])];
+// (i modelli 2.5 non sono più disponibili per i nuovi account, quindi usiamo solo la serie 3.x)
+const GEMINI_MODELS = [
+  ...new Set([GEMINI_MODEL, 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.6-flash']),
+];
 
 async function askGemini(history) {
   let lastErr;
@@ -529,11 +532,19 @@ async function askGeminiModel(model, history) {
 
   const started = Date.now();
   // "thinkingLevel: low" = il modello ragiona meno, quindi risponde più in fretta
-  let { res, data } = await send({ maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: 'low' } });
+  let cfg = { maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: 'low' } };
+  let { res, data } = await send(cfg);
 
   // Se il modello non supporta quell'opzione, riprova senza
   if (res.status === 400 && /thinking/i.test(JSON.stringify(data))) {
-    ({ res, data } = await send({ maxOutputTokens: 1024 }));
+    cfg = { maxOutputTokens: 1024 };
+    ({ res, data } = await send(cfg));
+  }
+
+  // "High demand" (503) o quota momentanea (429): di solito è un picco breve, riprova una volta
+  if (res.status === 503 || res.status === 429) {
+    await new Promise((r) => setTimeout(r, 1500));
+    ({ res, data } = await send(cfg));
   }
 
   console.log(`⏱️ Gemini (${model}): risposta in ${((Date.now() - started) / 1000).toFixed(1)}s (status ${res.status})`);
