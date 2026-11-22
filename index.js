@@ -441,7 +441,7 @@ async function handleModal(interaction) {
 // oppure Claude di Anthropic (a pagamento) con ANTHROPIC_API_KEY.
 // Se imposti entrambe le chiavi, viene usato Gemini.
 const { GEMINI_API_KEY, ANTHROPIC_API_KEY } = process.env;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const AI_MODEL = process.env.AI_MODEL || 'claude-haiku-5-5';
 const AI_PROVIDER = GEMINI_API_KEY ? 'gemini' : ANTHROPIC_API_KEY ? 'claude' : null;
 const DM_DAILY_LIMIT = Number(process.env.DM_DAILY_LIMIT) || 40; // messaggi al giorno per utente
@@ -488,8 +488,26 @@ async function askZyra(history) {
   return AI_PROVIDER === 'gemini' ? askGemini(history) : askClaude(history);
 }
 
+// Prova i modelli in ordine: se uno è lento, sovraccarico o non disponibile passa al successivo.
+const GEMINI_MODELS = [...new Set([GEMINI_MODEL, 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'])];
+
 async function askGemini(history) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  let lastErr;
+  for (const model of GEMINI_MODELS) {
+    try {
+      const text = await askGeminiModel(model, history);
+      if (text) return text;
+      lastErr = new Error(`Risposta vuota da ${model}`);
+    } catch (err) {
+      lastErr = err;
+      console.error(`⚠️ Gemini (${model}) non ha funzionato: ${err.message}`);
+    }
+  }
+  throw lastErr;
+}
+
+async function askGeminiModel(model, history) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const baseBody = {
     systemInstruction: { parts: [{ text: ZYRA_PERSONA }] },
     contents: history.map((m) => ({
@@ -503,30 +521,23 @@ async function askGemini(history) {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
       body: JSON.stringify({ ...baseBody, generationConfig }),
-      signal: AbortSignal.timeout(30000), // dopo 30 secondi smette di aspettare
+      signal: AbortSignal.timeout(20000), // dopo 20 secondi passa al modello successivo
     });
     const data = await res.json().catch(() => ({}));
     return { res, data };
   };
 
   const started = Date.now();
-  // "thinkingLevel: low" = il modello ragiona meno, quindi risponde molto più in fretta
-  let cfg = { maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: 'low' } };
-  let { res, data } = await send(cfg);
+  // "thinkingLevel: low" = il modello ragiona meno, quindi risponde più in fretta
+  let { res, data } = await send({ maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: 'low' } });
 
   // Se il modello non supporta quell'opzione, riprova senza
   if (res.status === 400 && /thinking/i.test(JSON.stringify(data))) {
-    cfg = { maxOutputTokens: 1024 };
-    ({ res, data } = await send(cfg));
-  }
-  // Server sovraccarico o quota momentanea: un nuovo tentativo dopo 2 secondi
-  if (res.status === 429 || res.status === 503) {
-    await new Promise((r) => setTimeout(r, 2000));
-    ({ res, data } = await send(cfg));
+    ({ res, data } = await send({ maxOutputTokens: 1024 }));
   }
 
-  console.log(`⏱️ Gemini: risposta in ${((Date.now() - started) / 1000).toFixed(1)}s (status ${res.status})`);
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${JSON.stringify(data)}`);
+  console.log(`⏱️ Gemini (${model}): risposta in ${((Date.now() - started) / 1000).toFixed(1)}s (status ${res.status})`);
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
 
   const parts = data.candidates?.[0]?.content?.parts || [];
   return parts
