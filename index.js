@@ -214,18 +214,18 @@ async function handleCommand(interaction) {
       )
       .setColor(0x5865f2);
 
-    // GIF del pannello: se nella cartella del bot c'è il file "zyra.gif" viene allegato
+    // GIF del pannello (piccola, in alto a destra): se nella cartella del bot c'è il file "zyra.gif" viene allegato
     // direttamente (nessun link necessario). Altrimenti si usa PANEL_GIF_URL, se impostata.
     // Ordine di priorità: 1) link scritto nel codice, 2) file zyra.gif, 3) variabile PANEL_GIF_URL.
     const files = [];
     const gifPath = path.join(__dirname, PANEL_GIF_FILE);
     if (PANEL_GIF_LINK) {
-      embed.setImage(PANEL_GIF_LINK);
+      embed.setThumbnail(PANEL_GIF_LINK);
     } else if (fs.existsSync(gifPath)) {
       files.push(new AttachmentBuilder(gifPath, { name: PANEL_GIF_FILE }));
-      embed.setImage(`attachment://${PANEL_GIF_FILE}`);
+      embed.setThumbnail(`attachment://${PANEL_GIF_FILE}`);
     } else if (PANEL_GIF_URL) {
-      embed.setImage(PANEL_GIF_URL);
+      embed.setThumbnail(PANEL_GIF_URL);
     }
 
     const row = new ActionRowBuilder().addComponents(
