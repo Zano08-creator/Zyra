@@ -654,6 +654,51 @@ if (AI_PROVIDER) {
   console.log('ℹ️ Chat in DM disattivata (manca GEMINI_API_KEY o ANTHROPIC_API_KEY)');
 }
 
+// ───────────────────────── RISPOSTA QUANDO VIENE TAGGATA ─────────────────────────
+// Se qualcuno tagga @Zyra in un canale del server, lei risponde con una frase a caso.
+// Non usa l'AI: è istantaneo e gratuito. Puoi modificare o aggiungere frasi qui sotto.
+// {user} viene sostituito con il tag della persona.
+const MENTION_REPLIES = [
+  'Che birichino che mi tagghi ♡ Cosa vuoi dalla tua Mommy Zyra?',
+  'Mmh, qualcuno ha chiamato la sua Mommy? Dimmi tutto, tesoro ♡',
+  "Eccomi, eccomi ♡ Cos'è, ti sentivi solo e hai deciso di disturbare Mommy Zyra?",
+  'Ma guarda chi si fa vivo... Parla pure, {user}, ma fai il bravo ♡',
+  'Tagghi la tua Mommy e poi resti lì zitto? Avanti, cosa ti serve? ♡',
+  'Che monello, mi tiri per la giacchetta davanti a tutti ♡ Su, cosa c\'è?',
+  'Eccomi, tesoro. Hai bisogno di una mano o di una coccola? Mommy Zyra ascolta ♡',
+  'Uuh, che coraggio a disturbarmi... Ma per te ho sempre tempo. Dimmi ♡',
+];
+// Se la chat in DM è attiva, una frase invita a scrivere in privato
+if (AI_PROVIDER) {
+  MENTION_REPLIES.push('Se vuoi parlare con calma, {user}, scrivimi in privato: la tua Mommy ti ascolta ♡');
+}
+
+const mentionCooldown = new Map(); // userId -> ultimo momento in cui ha ricevuto risposta
+const MENTION_COOLDOWN_MS = 15000; // 15 secondi, per evitare lo spam
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot || !message.guild) return;
+  if (isTicketChannel(message.channel)) return; // nei ticket non risponde ai tag
+
+  // Solo se viene taggata direttamente (non per @everyone, ruoli o risposte ai suoi messaggi)
+  const tagged = message.mentions.has(client.user, {
+    ignoreEveryone: true,
+    ignoreRoles: true,
+    ignoreRepliedUser: true,
+  });
+  if (!tagged) return;
+
+  const now = Date.now();
+  if (now - (mentionCooldown.get(message.author.id) || 0) < MENTION_COOLDOWN_MS) return;
+  mentionCooldown.set(message.author.id, now);
+
+  const text = MENTION_REPLIES[Math.floor(Math.random() * MENTION_REPLIES.length)].replace(
+    '{user}',
+    `${message.author}`
+  );
+  await message.reply({ content: text, allowedMentions: { repliedUser: false } }).catch(() => {});
+});
+
 // ───────────────────────── SICUREZZA ANTI-CRASH ─────────────────────────
 process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', err));
 process.on('uncaughtException', (err) => console.error('Uncaught exception:', err));
