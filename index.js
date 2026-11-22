@@ -206,19 +206,11 @@ async function handleCommand(interaction) {
     const embed = new EmbedBuilder()
       .setTitle('🎫 Centro assistenza')
       .setDescription(
-        // Blocco "ansi": è l'unico modo per colorare il testo dentro un embed.
-        // \u001b[1;35m = grassetto + colore magenta/fluo, \u001b[0m = torna normale.
-        '```ansi\n' +
-          [
-            'Benvenuto nel pannello di Zyra. ♡',
-            'Hai bisogno di aiuto? Non preoccuparti, ci sono io.',
-            'Apri un ticket e spiegami con calma il tuo problema: mi occuperò di indirizzarti verso lo staff più adatto.',
-            'Ricorda: sii educato, preciso e paziente. Il mio compito è assicurarmi che tu venga ascoltato.',
-            'Zyra si prende cura di tutto. ♡',
-          ]
-            .map((line) => `\u001b[1;35m${line}\u001b[0m`)
-            .join('\n') +
-          '\n```'
+        'Benvenuto nel pannello di Zyra. ♡\n' +
+          'Hai bisogno di aiuto? Non preoccuparti, ci sono io.\n' +
+          'Apri un ticket e spiegami con calma il tuo problema: mi occuperò di indirizzarti verso lo staff più adatto.\n' +
+          'Ricorda: sii educato, preciso e paziente. Il mio compito è assicurarmi che tu venga ascoltato.\n' +
+          'Zyra si prende cura di tutto. ♡'
       )
       .setColor(0x2e0854); // viola molto scuro (striscia laterale del pannello)
 
