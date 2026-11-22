@@ -42,7 +42,7 @@ for (const [name, value] of Object.entries({ TOKEN, CLIENT_ID, STAFF_ROLE_ID }))
 
 // ➜ INCOLLA QUI IL LINK DIRETTO DELLA TUA GIF (es. 'https://i.imgur.com/xxxxxxx.gif')
 // Se lo lasci vuoto ('') il bot prova con il file zyra.gif o con la variabile PANEL_GIF_URL.
-const PANEL_GIF_LINK = 'https://i.imgur.com/I3hHePf.gif';
+const PANEL_GIF_LINK = '';
 
 // Nome del file GIF del pannello (alternativa al link: mettilo nella stessa cartella di index.js)
 const PANEL_GIF_FILE = 'zyra.gif';
@@ -204,14 +204,23 @@ async function handleCommand(interaction) {
 
   if (commandName === 'setup') {
     const embed = new EmbedBuilder()
-      .setTitle('🎫 Pannello di Zyra. ♡')
+      .setTitle('🎫 Centro assistenza')
       .setDescription(
-        'Benvenuto nel pannello di Zyra. ♡\n' +
-          'Hai bisogno di aiuto? Non preoccuparti, ci sono io.\n' +
-          'Apri un ticket e spiegami con calma il tuo problema: mi occuperò di indirizzarti verso lo staff più adatto.\n' +
-          'Zyra si prende cura di tutto. ♡'
+        // Blocco "ansi": è l'unico modo per colorare il testo dentro un embed.
+        // \u001b[1;35m = grassetto + colore magenta/fluo, \u001b[0m = torna normale.
+        '```ansi\n' +
+          [
+            'Benvenuto nel pannello di Zyra. ♡',
+            'Hai bisogno di aiuto? Non preoccuparti, ci sono io.',
+            'Apri un ticket e spiegami con calma il tuo problema: mi occuperò di indirizzarti verso lo staff più adatto.',
+            'Ricorda: sii educato, preciso e paziente. Il mio compito è assicurarmi che tu venga ascoltato.',
+            'Zyra si prende cura di tutto. ♡',
+          ]
+            .map((line) => `\u001b[1;35m${line}\u001b[0m`)
+            .join('\n') +
+          '\n```'
       )
-      .setColor(301934);
+      .setColor(0x2e0854); // viola molto scuro (striscia laterale del pannello)
 
     // GIF del pannello (piccola, in alto a destra): se nella cartella del bot c'è il file "zyra.gif" viene allegato
     // direttamente (nessun link necessario). Altrimenti si usa PANEL_GIF_URL, se impostata.
