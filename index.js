@@ -444,7 +444,14 @@ const { GEMINI_API_KEY, ANTHROPIC_API_KEY } = process.env;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const AI_MODEL = process.env.AI_MODEL || 'claude-haiku-5-5';
 const AI_PROVIDER = GEMINI_API_KEY ? 'gemini' : ANTHROPIC_API_KEY ? 'claude' : null;
-const DM_DAILY_LIMIT = Number(process.env.DM_DAILY_LIMIT) || 0; // messaggi al giorno per utente (0 = nessun limite)
+const DM_DAILY_LIMIT = Number(process.env.DM_DAILY_LIMIT) || 50; // messaggi al giorno per utente
+
+// Utenti senza limite di messaggi (ID Discord). Per aggiungerne altri: mettili qui sotto
+// separati da una virgola, oppure nella variabile UNLIMITED_USER_IDS su Render.
+const UNLIMITED_USER_IDS = new Set([
+  '1254483146905489421',
+  ...(process.env.UNLIMITED_USER_IDS || '').split(',').map((id) => id.trim()).filter(Boolean),
+]);
 const MAX_HISTORY = 20; // quanti messaggi ricorda per ogni utente
 
 // ➜ Qui puoi cambiare la personalità di Zyra
@@ -473,7 +480,7 @@ const usage = new Map(); // userId -> { day, count }
 const busy = new Set(); // utenti con una risposta in corso
 
 function underDailyLimit(userId) {
-  if (!DM_DAILY_LIMIT) return true; // nessun limite
+  if (UNLIMITED_USER_IDS.has(userId)) return true; // utente senza limite
   const today = new Date().toISOString().slice(0, 10);
   const u = usage.get(userId);
   if (!u || u.day !== today) {
