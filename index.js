@@ -204,14 +204,14 @@ async function handleCommand(interaction) {
 
   if (commandName === 'setup') {
     const embed = new EmbedBuilder()
-      .setTitle('🎫Pannello di Zyra. ♡')
+      .setTitle('🎫 Pannello di Zyra. ♡')
       .setDescription(
         'Benvenuto nel pannello di Zyra. ♡\n' +
           'Hai bisogno di aiuto? Non preoccuparti, ci sono io.\n' +
           'Apri un ticket e spiegami con calma il tuo problema: mi occuperò di indirizzarti verso lo staff più adatto.\n' +
           'Zyra si prende cura di tutto. ♡'
       )
-      .setColor(0x5865f2);
+      .setColor(301934);
 
     // GIF del pannello (piccola, in alto a destra): se nella cartella del bot c'è il file "zyra.gif" viene allegato
     // direttamente (nessun link necessario). Altrimenti si usa PANEL_GIF_URL, se impostata.
