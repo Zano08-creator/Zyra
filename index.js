@@ -54,6 +54,28 @@ http
   })
   .listen(PORT, () => console.log(`🌐 Web server in ascolto sulla porta ${PORT}`));
 
+// ───────────────────────── AUTO-PING (keep-alive) ─────────────────────────
+// Il bot visita il proprio indirizzo pubblico a intervalli regolari, così Render
+// vede traffico e non mette il servizio in sleep (piano gratuito: sleep dopo ~15 min).
+// RENDER_EXTERNAL_URL è impostata automaticamente da Render.
+// Intervallo predefinito: 10 minuti (modificabile con PING_INTERVAL_MINUTES).
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL;
+const PING_MINUTES = Number(process.env.PING_INTERVAL_MINUTES) || 10;
+
+if (SELF_URL) {
+  setInterval(async () => {
+    try {
+      const res = await fetch(SELF_URL);
+      console.log(`🏓 Auto-ping a ${SELF_URL}: ${res.status}`);
+    } catch (err) {
+      console.error('Auto-ping fallito:', err.message);
+    }
+  }, PING_MINUTES * 60 * 1000);
+  console.log(`🏓 Auto-ping attivo ogni ${PING_MINUTES} minuti`);
+} else {
+  console.log('ℹ️ Auto-ping disattivato (nessun RENDER_EXTERNAL_URL: normale in locale)');
+}
+
 // ───────────────────────── CLIENT ─────────────────────────
 const client = new Client({
   intents: [
@@ -174,8 +196,11 @@ async function handleCommand(interaction) {
     const embed = new EmbedBuilder()
       .setTitle('🎫 Centro assistenza')
       .setDescription(
-        'Hai bisogno di aiuto? Scegli una categoria qui sotto per aprire un ticket.\n' +
-          'Verrà creato un canale privato visibile solo a te e allo staff.'
+        'Benvenuto nel pannello di Zyra. ♡\n' +
+          'Hai bisogno di aiuto? Non preoccuparti, ci sono io.\n' +
+          'Apri un ticket e spiegami con calma il tuo problema: mi occuperò di indirizzarti verso lo staff più adatto.\n' +
+          'Ricorda: sii educato, preciso e paziente. Il mio compito è assicurarmi che tu venga ascoltato.\n' +
+          'Zyra si prende cura di tutto. ♡'
       )
       .setColor(0x5865f2);
 
