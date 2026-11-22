@@ -1,5 +1,7 @@
 require('dotenv').config();
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const {
   Client,
   GatewayIntentBits,
@@ -37,6 +39,13 @@ for (const [name, value] of Object.entries({ TOKEN, CLIENT_ID, STAFF_ROLE_ID }))
     process.exit(1);
   }
 }
+
+// ➜ INCOLLA QUI IL LINK DIRETTO DELLA TUA GIF (es. 'https://i.imgur.com/xxxxxxx.gif')
+// Se lo lasci vuoto ('') il bot prova con il file zyra.gif o con la variabile PANEL_GIF_URL.
+const PANEL_GIF_LINK = 'https://i.imgur.com/I3hHePf.gif';
+
+// Nome del file GIF del pannello (alternativa al link: mettilo nella stessa cartella di index.js)
+const PANEL_GIF_FILE = 'zyra.gif';
 
 // Categorie di ticket (modificale come vuoi)
 const CATEGORIES = {
@@ -205,8 +214,19 @@ async function handleCommand(interaction) {
       )
       .setColor(0x5865f2);
 
-    // GIF del pannello (impostala con la variabile PANEL_GIF_URL)
-    if (PANEL_GIF_URL) embed.setImage(PANEL_GIF_URL);
+    // GIF del pannello: se nella cartella del bot c'è il file "zyra.gif" viene allegato
+    // direttamente (nessun link necessario). Altrimenti si usa PANEL_GIF_URL, se impostata.
+    // Ordine di priorità: 1) link scritto nel codice, 2) file zyra.gif, 3) variabile PANEL_GIF_URL.
+    const files = [];
+    const gifPath = path.join(__dirname, PANEL_GIF_FILE);
+    if (PANEL_GIF_LINK) {
+      embed.setImage(PANEL_GIF_LINK);
+    } else if (fs.existsSync(gifPath)) {
+      files.push(new AttachmentBuilder(gifPath, { name: PANEL_GIF_FILE }));
+      embed.setImage(`attachment://${PANEL_GIF_FILE}`);
+    } else if (PANEL_GIF_URL) {
+      embed.setImage(PANEL_GIF_URL);
+    }
 
     const row = new ActionRowBuilder().addComponents(
       Object.entries(CATEGORIES).map(([key, cat]) =>
@@ -214,7 +234,7 @@ async function handleCommand(interaction) {
       )
     );
 
-    await interaction.channel.send({ embeds: [embed], components: [row] });
+    await interaction.channel.send({ embeds: [embed], components: [row], files });
     return interaction.reply(ephemeral('✅ Pannello inviato!'));
   }
 
