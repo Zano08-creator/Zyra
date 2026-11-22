@@ -204,12 +204,11 @@ async function handleCommand(interaction) {
 
   if (commandName === 'setup') {
     const embed = new EmbedBuilder()
-      .setTitle('🎫 Centro assistenza')
+      .setTitle('🎫Pannello di Zyra. ♡')
       .setDescription(
         'Benvenuto nel pannello di Zyra. ♡\n' +
           'Hai bisogno di aiuto? Non preoccuparti, ci sono io.\n' +
           'Apri un ticket e spiegami con calma il tuo problema: mi occuperò di indirizzarti verso lo staff più adatto.\n' +
-          'Ricorda: sii educato, preciso e paziente. Il mio compito è assicurarmi che tu venga ascoltato.\n' +
           'Zyra si prende cura di tutto. ♡'
       )
       .setColor(0x5865f2);
