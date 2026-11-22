@@ -444,7 +444,7 @@ const { GEMINI_API_KEY, ANTHROPIC_API_KEY } = process.env;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const AI_MODEL = process.env.AI_MODEL || 'claude-haiku-5-5';
 const AI_PROVIDER = GEMINI_API_KEY ? 'gemini' : ANTHROPIC_API_KEY ? 'claude' : null;
-const DM_DAILY_LIMIT = Number(process.env.DM_DAILY_LIMIT) || 40; // messaggi al giorno per utente
+const DM_DAILY_LIMIT = Number(process.env.DM_DAILY_LIMIT) || 0; // messaggi al giorno per utente (0 = nessun limite)
 const MAX_HISTORY = 20; // quanti messaggi ricorda per ogni utente
 
 // ➜ Qui puoi cambiare la personalità di Zyra
@@ -473,6 +473,7 @@ const usage = new Map(); // userId -> { day, count }
 const busy = new Set(); // utenti con una risposta in corso
 
 function underDailyLimit(userId) {
+  if (!DM_DAILY_LIMIT) return true; // nessun limite
   const today = new Date().toISOString().slice(0, 10);
   const u = usage.get(userId);
   if (!u || u.day !== today) {
@@ -484,8 +485,8 @@ function underDailyLimit(userId) {
   return true;
 }
 
-async function askZyra(history) {
-  return AI_PROVIDER === 'gemini' ? askGemini(history) : askClaude(history);
+async function askZyra(history, system = ZYRA_PERSONA) {
+  return AI_PROVIDER === 'gemini' ? askGemini(history, system) : askClaude(history, system);
 }
 
 // Prova i modelli in ordine: se uno è lento, sovraccarico o non disponibile passa al successivo.
@@ -494,11 +495,11 @@ const GEMINI_MODELS = [
   ...new Set([GEMINI_MODEL, 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.6-flash']),
 ];
 
-async function askGemini(history) {
+async function askGemini(history, system) {
   let lastErr;
   for (const model of GEMINI_MODELS) {
     try {
-      const text = await askGeminiModel(model, history);
+      const text = await askGeminiModel(model, history, system);
       if (text) return text;
       lastErr = new Error(`Risposta vuota da ${model}`);
     } catch (err) {
@@ -509,10 +510,10 @@ async function askGemini(history) {
   throw lastErr;
 }
 
-async function askGeminiModel(model, history) {
+async function askGeminiModel(model, history, system) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const baseBody = {
-    systemInstruction: { parts: [{ text: ZYRA_PERSONA }] },
+    systemInstruction: { parts: [{ text: system }] },
     contents: history.map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }],
@@ -558,7 +559,7 @@ async function askGeminiModel(model, history) {
     .trim();
 }
 
-async function askClaude(history) {
+async function askClaude(history, system) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -569,7 +570,7 @@ async function askClaude(history) {
     body: JSON.stringify({
       model: AI_MODEL,
       max_tokens: 400,
-      system: ZYRA_PERSONA,
+      system,
       messages: history,
     }),
   });
@@ -656,7 +657,8 @@ if (AI_PROVIDER) {
 
 // ───────────────────────── RISPOSTA QUANDO VIENE TAGGATA ─────────────────────────
 // Se qualcuno tagga @Zyra in un canale del server, lei risponde con una frase a caso.
-// Non usa l'AI: è istantaneo e gratuito. Puoi modificare o aggiungere frasi qui sotto.
+// Se scrive solo il tag, la risposta è istantanea e gratuita (senza AI). Se scrive anche un
+// messaggio dopo il tag e l'AI è attiva, Zyra risponde con l'AI. Puoi modificare le frasi qui sotto.
 // {user} viene sostituito con il tag della persona.
 const MENTION_REPLIES = [
   'Che birichino che mi tagghi ♡ Cosa vuoi dalla tua Mommy Zyra?',
@@ -671,6 +673,62 @@ const MENTION_REPLIES = [
 // Se la chat in DM è attiva, una frase invita a scrivere in privato
 if (AI_PROVIDER) {
   MENTION_REPLIES.push('Se vuoi parlare con calma, {user}, scrivimi in privato: la tua Mommy ti ascolta ♡');
+}
+
+// ───── Conversazione nei canali pubblici (@Zyra + messaggio) ─────
+// Server di soli maggiorenni: Zyra mantiene la sua personalità anche nei canali pubblici,
+// ma tiene il tono leggero (senza contenuti espliciti) e porta i temi delicati in privato.
+const PUBLIC_ADDENDUM = `
+
+Contesto attuale: stai scrivendo in un CANALE PUBBLICO del server, dove leggono anche altre persone (tutte maggiorenni). Mantieni la stessa personalità di sempre, comprese le battute birichine quando il contesto lo permette, ma tieni il tono leggero e senza contenuti espliciti, perché ti leggono anche gli altri. Se la persona parla di qualcosa di molto personale o difficile, rispondile con dolcezza e invitala a scriverti in privato. Rispondi in modo breve (1-3 frasi).`;
+
+const NO_PINGS = { parse: [], repliedUser: false }; // evita che Zyra pinghi qualcuno per sbaglio
+
+async function handlePublicChat(message, question) {
+  const userId = message.author.id;
+  const key = `pub:${message.channel.id}:${userId}`; // memoria separata per canale e utente
+
+  if (question.toLowerCase() === '!reset') {
+    chats.delete(key);
+    return message.reply({ content: 'Ok, ricominciamo da capo ♡', allowedMentions: NO_PINGS }).catch(() => {});
+  }
+  if (busy.has(key)) return;
+  if (!underDailyLimit(userId)) {
+    return message
+      .reply({ content: 'Oggi abbiamo chiacchierato tantissimo ♡ Ci sentiamo domani!', allowedMentions: NO_PINGS })
+      .catch(() => {});
+  }
+
+  busy.add(key);
+  const typing = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
+  message.channel.sendTyping().catch(() => {});
+
+  const history = chats.get(key) || [];
+  history.push({ role: 'user', content: question.slice(0, 2000) });
+  while (history.length > MAX_HISTORY) history.shift();
+  while (history.length && history[0].role !== 'user') history.shift();
+
+  try {
+    const reply = await askZyra(history, ZYRA_PERSONA + PUBLIC_ADDENDUM);
+    if (!reply) throw new Error('Risposta vuota');
+    history.push({ role: 'assistant', content: reply });
+    chats.set(key, history);
+    if (chats.size > 500) chats.delete(chats.keys().next().value);
+
+    const parts = splitMessage(reply);
+    await message.reply({ content: parts[0], allowedMentions: NO_PINGS });
+    for (const part of parts.slice(1)) await message.channel.send({ content: part, allowedMentions: NO_PINGS });
+  } catch (err) {
+    console.error('Errore chat pubblica:', err.message);
+    history.pop();
+    chats.set(key, history);
+    await message
+      .reply({ content: 'Scusa, ho avuto un piccolo problema ♡ Riprova tra un momento.', allowedMentions: NO_PINGS })
+      .catch(() => {});
+  } finally {
+    clearInterval(typing);
+    busy.delete(key);
+  }
 }
 
 const mentionCooldown = new Map(); // userId -> ultimo momento in cui ha ricevuto risposta
@@ -688,6 +746,11 @@ client.on('messageCreate', async (message) => {
   });
   if (!tagged) return;
 
+  // Testo scritto dopo il tag (senza il tag stesso): se c'è, Zyra risponde con l'AI
+  const question = message.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+  if (AI_PROVIDER && question) return handlePublicChat(message, question);
+
+  // Solo il tag, senza testo: risposta a caso tra le frasi qui sopra
   const now = Date.now();
   if (now - (mentionCooldown.get(message.author.id) || 0) < MENTION_COOLDOWN_MS) return;
   mentionCooldown.set(message.author.id, now);
