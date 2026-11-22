@@ -42,7 +42,7 @@ for (const [name, value] of Object.entries({ TOKEN, CLIENT_ID, STAFF_ROLE_ID }))
 
 // ➜ INCOLLA QUI IL LINK DIRETTO DELLA TUA GIF (es. 'https://i.imgur.com/xxxxxxx.gif')
 // Se lo lasci vuoto ('') il bot prova con il file zyra.gif o con la variabile PANEL_GIF_URL.
-const PANEL_GIF_LINK = '';
+const PANEL_GIF_LINK = 'https://i.imgur.com/Wdr2lWL.gif';
 
 // Nome del file GIF del pannello (alternativa al link: mettilo nella stessa cartella di index.js)
 const PANEL_GIF_FILE = 'zyra.gif';
