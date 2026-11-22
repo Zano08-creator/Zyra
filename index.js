@@ -489,23 +489,45 @@ async function askZyra(history) {
 }
 
 async function askGemini(history) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  const baseBody = {
+    systemInstruction: { parts: [{ text: ZYRA_PERSONA }] },
+    contents: history.map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    })),
+  };
+
+  const send = async (generationConfig) => {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: ZYRA_PERSONA }] },
-        contents: history.map((m) => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        })),
-        generationConfig: { maxOutputTokens: 1024 },
-      }),
-    }
-  );
-  const data = await res.json();
+      body: JSON.stringify({ ...baseBody, generationConfig }),
+      signal: AbortSignal.timeout(30000), // dopo 30 secondi smette di aspettare
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  };
+
+  const started = Date.now();
+  // "thinkingLevel: low" = il modello ragiona meno, quindi risponde molto più in fretta
+  let cfg = { maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: 'low' } };
+  let { res, data } = await send(cfg);
+
+  // Se il modello non supporta quell'opzione, riprova senza
+  if (res.status === 400 && /thinking/i.test(JSON.stringify(data))) {
+    cfg = { maxOutputTokens: 1024 };
+    ({ res, data } = await send(cfg));
+  }
+  // Server sovraccarico o quota momentanea: un nuovo tentativo dopo 2 secondi
+  if (res.status === 429 || res.status === 503) {
+    await new Promise((r) => setTimeout(r, 2000));
+    ({ res, data } = await send(cfg));
+  }
+
+  console.log(`⏱️ Gemini: risposta in ${((Date.now() - started) / 1000).toFixed(1)}s (status ${res.status})`);
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${JSON.stringify(data)}`);
+
   const parts = data.candidates?.[0]?.content?.parts || [];
   return parts
     .filter((p) => p.text && !p.thought)
