@@ -27,6 +27,7 @@ const {
   STAFF_ROLE_ID,
   CATEGORY_ID, // opzionale: categoria dove creare i ticket
   LOG_CHANNEL_ID, // opzionale: canale dove inviare le trascrizioni
+  PANEL_GIF_URL, // opzionale: link diretto a una GIF/immagine da mostrare nel pannello
   PORT = 3000,
 } = process.env;
 
@@ -203,6 +204,9 @@ async function handleCommand(interaction) {
           'Zyra si prende cura di tutto. ♡'
       )
       .setColor(0x5865f2);
+
+    // GIF del pannello (impostala con la variabile PANEL_GIF_URL)
+    if (PANEL_GIF_URL) embed.setImage(PANEL_GIF_URL);
 
     const row = new ActionRowBuilder().addComponents(
       Object.entries(CATEGORIES).map(([key, cat]) =>
