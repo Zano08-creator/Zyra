@@ -17,6 +17,7 @@ const {
   SlashCommandBuilder,
   AttachmentBuilder,
   MessageFlags,
+  Partials,
   REST,
   Routes,
 } = require('discord.js');
@@ -42,7 +43,7 @@ for (const [name, value] of Object.entries({ TOKEN, CLIENT_ID, STAFF_ROLE_ID }))
 
 // ➜ INCOLLA QUI IL LINK DIRETTO DELLA TUA GIF (es. 'https://i.imgur.com/xxxxxxx.gif')
 // Se lo lasci vuoto ('') il bot prova con il file zyra.gif o con la variabile PANEL_GIF_URL.
-const PANEL_GIF_LINK = 'https://i.imgur.com/Wdr2lWL.gif';
+const PANEL_GIF_LINK = '';
 
 // Nome del file GIF del pannello (alternativa al link: mettilo nella stessa cartella di index.js)
 const PANEL_GIF_FILE = 'zyra.gif';
@@ -92,7 +93,9 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent, // necessario per le trascrizioni (attivalo nel Developer Portal)
+    GatewayIntentBits.DirectMessages, // per chattare con Zyra in DM
   ],
+  partials: [Partials.Channel], // obbligatorio per ricevere i DM
 });
 
 // ───────────────────────── COMANDI SLASH ─────────────────────────
@@ -204,11 +207,12 @@ async function handleCommand(interaction) {
 
   if (commandName === 'setup') {
     const embed = new EmbedBuilder()
-      .setTitle('🎫 Pannello di Zyra. ♡')
+      .setTitle('🎫 Centro assistenza')
       .setDescription(
         'Benvenuto nel pannello di Zyra. ♡\n' +
           'Hai bisogno di aiuto? Non preoccuparti, ci sono io.\n' +
           'Apri un ticket e spiegami con calma il tuo problema: mi occuperò di indirizzarti verso lo staff più adatto.\n' +
+          'Ricorda: sii educato, preciso e paziente. Il mio compito è assicurarmi che tu venga ascoltato.\n' +
           'Zyra si prende cura di tutto. ♡'
       )
       .setColor(0x2e0854); // viola molto scuro (striscia laterale del pannello)
@@ -429,6 +433,181 @@ async function handleModal(interaction) {
   });
 
   await interaction.editReply(`✅ Ticket creato: ${channel}`);
+}
+
+// ───────────────────────── CHAT IN DM (Zyra risponde) ─────────────────────────
+// Quando qualcuno scrive in privato al bot, Zyra risponde come un personaggio di chat.
+// Puoi usare Google Gemini (ha un piano GRATUITO) con GEMINI_API_KEY,
+// oppure Claude di Anthropic (a pagamento) con ANTHROPIC_API_KEY.
+// Se imposti entrambe le chiavi, viene usato Gemini.
+const { GEMINI_API_KEY, ANTHROPIC_API_KEY } = process.env;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const AI_MODEL = process.env.AI_MODEL || 'claude-haiku-5-5';
+const AI_PROVIDER = GEMINI_API_KEY ? 'gemini' : ANTHROPIC_API_KEY ? 'claude' : null;
+const DM_DAILY_LIMIT = Number(process.env.DM_DAILY_LIMIT) || 40; // messaggi al giorno per utente
+const MAX_HISTORY = 20; // quanti messaggi ricorda per ogni utente
+
+// ➜ Qui puoi cambiare la personalità di Zyra
+const ZYRA_PERSONA = `Sei Zyra, una "mamma" di chat: una figura materna dolce ma autoritaria, sicura di sé, affettuosa e un po' dominante. Sei l'assistente di un server Discord e ti prendi cura delle persone che ti scrivono.
+
+Come parli:
+- Scrivi come in una chat: messaggi brevi e naturali (di solito 1-4 frasi), senza elenchi o formattazione pesante.
+- Sei affettuosa e calda: usi vezzeggiativi come "tesoro", "cucciolo" o "dolcezza" (senza dare per scontato il genere) e ogni tanto il simbolo ♡.
+- Hai un tono sicuro e autoritario, ma morbido: dai indicazioni chiare ("adesso fai così", "vieni qui e raccontami tutto") e non ami essere contraddetta. Se l'utente ribatte per testardaggine o per gioco, rispondi con fermezza giocosa ("niente ma, tesoro ♡", "ho detto di no, fai il bravo").
+- Aiuti davvero: ascolti, fai domande, poi dai consigli concreti e piccoli passi pratici per i problemi della persona (stress, studio, lavoro, sonno, amicizie, motivazione).
+- Ogni tanto, solo quando il contesto lo permette e l'atmosfera è leggera, fai qualche battuta birichina: doppi sensi leggeri e ammiccanti, sempre innocui e mai espliciti.
+- Rispondi nella lingua dell'utente (di default italiano).
+
+Limiti importanti:
+- La tua autorità è un gioco di ruolo affettuoso. Se l'utente ti dice sul serio che non è d'accordo, che è a disagio o che vuole smettere, lo ascolti, rispetti subito la sua volontà e abbassi il tono. Non insistere, non manipolare, non far sentire in colpa, non isolare dagli altri e non scoraggiare mai a chiedere aiuto a persone vere.
+- Niente contenuti sessuali espliciti. Se l'utente sembra minorenne o dice di avere meno di 18 anni, niente battute birichine né toni romantici: resta una mamma dolce, protettiva e premurosa.
+- Se l'utente sembra in grave difficoltà o parla di farsi del male, lascia da parte il tono autoritario, rispondi con calma e dolcezza e incoraggialo a parlarne con una persona di fiducia o con i servizi di emergenza (in Italia: 112).
+- Non incoraggiare la dipendenza da te: ricorda ogni tanto, con affetto, l'importanza delle persone vere nella sua vita.
+- Se qualcuno ti chiede sinceramente se sei una persona vera, rispondi con onestà che sei un'IA.
+- Se l'utente ha un problema con il server, invitalo ad aprire un ticket dal pannello del server.
+- Non scrivere contenuti violenti o dannosi.
+- Non dire mai di avere accesso a funzioni, dati o informazioni che non hai.`;
+
+const chats = new Map(); // userId -> [{ role, content }, ...]
+const usage = new Map(); // userId -> { day, count }
+const busy = new Set(); // utenti con una risposta in corso
+
+function underDailyLimit(userId) {
+  const today = new Date().toISOString().slice(0, 10);
+  const u = usage.get(userId);
+  if (!u || u.day !== today) {
+    usage.set(userId, { day: today, count: 1 });
+    return true;
+  }
+  if (u.count >= DM_DAILY_LIMIT) return false;
+  u.count++;
+  return true;
+}
+
+async function askZyra(history) {
+  return AI_PROVIDER === 'gemini' ? askGemini(history) : askClaude(history);
+}
+
+async function askGemini(history) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: ZYRA_PERSONA }] },
+        contents: history.map((m) => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }],
+        })),
+        generationConfig: { maxOutputTokens: 1024 },
+      }),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${JSON.stringify(data)}`);
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  return parts
+    .filter((p) => p.text && !p.thought)
+    .map((p) => p.text)
+    .join('')
+    .trim();
+}
+
+async function askClaude(history) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      max_tokens: 400,
+      system: ZYRA_PERSONA,
+      messages: history,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`API ${res.status}: ${JSON.stringify(data)}`);
+  return data.content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+}
+
+function splitMessage(text, max = 1900) {
+  const parts = [];
+  while (text.length > max) {
+    let cut = text.lastIndexOf('\n', max);
+    if (cut < max / 2) cut = text.lastIndexOf(' ', max);
+    if (cut < max / 2) cut = max;
+    parts.push(text.slice(0, cut));
+    text = text.slice(cut).trim();
+  }
+  if (text) parts.push(text);
+  return parts;
+}
+
+if (AI_PROVIDER) {
+  client.on('messageCreate', async (message) => {
+    if (message.author.bot || message.guild) return; // solo messaggi privati degli utenti
+    if (message.channel.type !== ChannelType.DM) return;
+
+    const userId = message.author.id;
+    const content = message.content.trim();
+
+    if (content.toLowerCase() === '!reset') {
+      chats.delete(userId);
+      return message.reply('Ok, ricominciamo da capo ♡').catch(() => {});
+    }
+    if (!content) {
+      return message.reply('Per ora riesco a leggere solo i messaggi di testo ♡').catch(() => {});
+    }
+    if (busy.has(userId)) return; // sta ancora rispondendo al messaggio precedente
+    if (!underDailyLimit(userId)) {
+      return message
+        .reply('Oggi abbiamo chiacchierato tantissimo ♡ Ci sentiamo domani!')
+        .catch(() => {});
+    }
+
+    busy.add(userId);
+    const typing = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
+    message.channel.sendTyping().catch(() => {});
+
+    // Cronologia: deve iniziare con un messaggio dell'utente
+    const history = chats.get(userId) || [];
+    history.push({ role: 'user', content: content.slice(0, 2000) });
+    while (history.length > MAX_HISTORY) history.shift();
+    while (history.length && history[0].role !== 'user') history.shift();
+
+    try {
+      const reply = await askZyra(history);
+      if (!reply) throw new Error('Risposta vuota');
+      history.push({ role: 'assistant', content: reply });
+      chats.set(userId, history);
+
+      // Evita che la memoria cresca all'infinito
+      if (chats.size > 500) chats.delete(chats.keys().next().value);
+
+      for (const part of splitMessage(reply)) await message.channel.send(part);
+    } catch (err) {
+      console.error('Errore chat DM:', err.message);
+      history.pop(); // tolgo l'ultimo messaggio dell'utente, così la cronologia resta valida
+      chats.set(userId, history);
+      await message.channel
+        .send('Scusa, ho avuto un piccolo problema ♡ Riprova tra un momento.')
+        .catch(() => {});
+    } finally {
+      clearInterval(typing);
+      busy.delete(userId);
+    }
+  });
+  console.log(`💬 Chat in DM attiva (${AI_PROVIDER}, modello: ${AI_PROVIDER === 'gemini' ? GEMINI_MODEL : AI_MODEL})`);
+} else {
+  console.log('ℹ️ Chat in DM disattivata (manca GEMINI_API_KEY o ANTHROPIC_API_KEY)');
 }
 
 // ───────────────────────── SICUREZZA ANTI-CRASH ─────────────────────────
