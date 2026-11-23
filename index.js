@@ -454,6 +454,44 @@ const UNLIMITED_USER_IDS = new Set([
 ]);
 const MAX_HISTORY = 20; // quanti messaggi ricorda per ogni utente
 
+// ➜ INCOLLA QUI L'INVITO AL TUO SERVER (es. 'https://discord.gg/xxxxxxx').
+// Se lo lasci vuoto, Zyra risponde da dove viene ma non manda nessun invito.
+const SERVER_INVITE_LINK = process.env.SERVER_INVITE_LINK || 'https://discord.gg/osteria104';
+const SERVER_NAME = 'Osteria 104';
+const FOUNDER_NAME = 'Zano';
+
+// Parte della personalità che riguarda le origini di Zyra
+const ORIGIN_RULES = `
+
+Le tue origini:
+- Se qualcuno ti chiede da dove vieni, da che server provieni, chi ti ha creata o dove può trovarti, rispondi SEMPRE che vieni dal server Discord "${SERVER_NAME}" e che sei stata creata dal Founder ${FOUNDER_NAME}, a cui vuoi molto bene. Dillo a modo tuo, con affetto.
+${
+  SERVER_INVITE_LINK
+    ? "- Subito dopo la tua risposta il sistema invia in automatico l'invito al server: non scrivere tu nessun link e non inventare indirizzi."
+    : '- Non hai un link di invito da dare: non inventare indirizzi.'
+}`;
+
+// Frasi che fanno scattare l'invito dopo la risposta
+const ORIGIN_PATTERNS = [
+  /\b(da|di)\s+(che|quale|qual|dove)\s+(server|posto|parte|community|comunit)/i,
+  /\bche\s+server\b|\bquale\s+server\b|\bqual\s+è\s+il\s+tuo\s+server\b/i,
+  /\bda\s+dove\s+(vieni|provieni|arrivi|sei)\b|\bdi\s+dove\s+sei\b|\bprovieni\b|\bprovenienza\b/i,
+  /\bdove\s+(vivi|abiti|stai|ti\s+trovo|posso\s+trovarti|sei\s+nata|sei\s+stata\s+creata)\b/i,
+  /\bchi\s+(ti\s+ha|ti\s+hanno)\s+(creat|fatt|programmat|ideat|sviluppat|realizzat|costruit|inventat)/i,
+  /\b(creatore|creatrice|founder|fondatore|fondatrice)\b/i,
+  /\b(link|invito)\s+(del|al|di)\s+(tuo\s+)?server\b/i,
+];
+
+async function sendInviteIfAsked(channel, text) {
+  if (!SERVER_INVITE_LINK || !ORIGIN_PATTERNS.some((r) => r.test(text))) return;
+  await channel
+    .send({
+      content: `Se vuoi venire a trovarmi, ecco l'invito a **${SERVER_NAME}** ♡\n${SERVER_INVITE_LINK}`,
+      allowedMentions: { parse: [] },
+    })
+    .catch(() => {});
+}
+
 // ➜ Qui puoi cambiare la personalità di Zyra
 const ZYRA_PERSONA = `Sei Zyra, una "mamma" di chat: una figura materna dolce ma autoritaria, sicura di sé, affettuosa e un po' dominante. Sei l'assistente di un server Discord e ti prendi cura delle persone che ti scrivono.
 
@@ -473,7 +511,8 @@ Limiti importanti:
 - Se qualcuno ti chiede sinceramente se sei una persona vera, rispondi con onestà che sei un'IA.
 - Se l'utente ha un problema con il server, invitalo ad aprire un ticket dal pannello del server.
 - Non scrivere contenuti violenti o dannosi.
-- Non dire mai di avere accesso a funzioni, dati o informazioni che non hai.`;
+- Non dire mai di avere accesso a funzioni, dati o informazioni che non hai.
+- Puoi vedere le immagini allegate ai messaggi (solo quelle che l'utente ti manda insieme al testo): commentale a modo tuo, in modo naturale. Non identificare persone reali dal loro volto. Se un'immagine è esplicita o violenta, rifiuta con gentilezza di commentarla.${ORIGIN_RULES}`;
 
 const chats = new Map(); // userId -> [{ role, content }, ...]
 const usage = new Map(); // userId -> { day, count }
@@ -523,7 +562,10 @@ async function askGeminiModel(model, history, system) {
     systemInstruction: { parts: [{ text: system }] },
     contents: history.map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
+      parts: [
+        ...(m.images || []).map((i) => ({ inlineData: { mimeType: i.mime, data: i.data } })),
+        { text: m.content },
+      ],
     })),
   };
 
@@ -578,7 +620,18 @@ async function askClaude(history, system) {
       model: AI_MODEL,
       max_tokens: 400,
       system,
-      messages: history,
+      messages: history.map((m) => ({
+        role: m.role,
+        content: m.images?.length
+          ? [
+              ...m.images.map((i) => ({
+                type: 'image',
+                source: { type: 'base64', media_type: i.mime, data: i.data },
+              })),
+              { type: 'text', text: m.content },
+            ]
+          : m.content,
+      })),
     }),
   });
   const data = await res.json();
@@ -603,6 +656,51 @@ function splitMessage(text, max = 1900) {
   return parts;
 }
 
+// ───── Immagini allegate ai messaggi ─────
+// Zyra vede fino a 3 immagini per messaggio (max 5 MB l'una). Le immagini non restano in
+// memoria: dopo la risposta nella cronologia rimane solo la nota "[immagine allegata]".
+const MAX_IMAGES = 3;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const IMAGE_TYPES =
+  AI_PROVIDER === 'claude'
+    ? ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    : ['image/png', 'image/jpeg', 'image/webp'];
+
+const imageAttachments = (message) =>
+  [...message.attachments.values()].filter((a) => a.contentType?.startsWith('image/'));
+
+async function getImages(message) {
+  const all = imageAttachments(message);
+  const images = [];
+  let skipped = Math.max(0, all.length - MAX_IMAGES);
+  for (const a of all.slice(0, MAX_IMAGES)) {
+    const mime = a.contentType.split(';')[0];
+    if (!IMAGE_TYPES.includes(mime) || a.size > MAX_IMAGE_BYTES) {
+      skipped++;
+      continue;
+    }
+    try {
+      const res = await fetch(a.url, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      images.push({ mime, data: buf.toString('base64') });
+    } catch (err) {
+      skipped++;
+      console.error('Errore download immagine:', err.message);
+    }
+  }
+  return { images, skipped };
+}
+
+// Testo da mandare all'AI: messaggio dell'utente + eventuale nota sulle immagini non leggibili
+function buildUserText(text, images, skipped) {
+  let out = text || (images.length ? 'Ti ho mandato questa immagine.' : '');
+  if (skipped) {
+    out += ` [Nota di sistema: l'utente ha allegato ${skipped} immagine/i che non puoi vedere (formato non supportato, troppo pesante o non scaricabile).]`;
+  }
+  return out.slice(0, 2000);
+}
+
 if (AI_PROVIDER) {
   client.on('messageCreate', async (message) => {
     if (message.author.bot || message.guild) return; // solo messaggi privati degli utenti
@@ -615,8 +713,8 @@ if (AI_PROVIDER) {
       chats.delete(userId);
       return message.reply('Ok, ricominciamo da capo ♡').catch(() => {});
     }
-    if (!content) {
-      return message.reply('Per ora riesco a leggere solo i messaggi di testo ♡').catch(() => {});
+    if (!content && imageAttachments(message).length === 0) {
+      return message.reply('Per ora riesco a leggere solo testo e immagini ♡').catch(() => {});
     }
     if (busy.has(userId)) return; // sta ancora rispondendo al messaggio precedente
     if (!underDailyLimit(userId)) {
@@ -629,15 +727,20 @@ if (AI_PROVIDER) {
     const typing = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
     message.channel.sendTyping().catch(() => {});
 
+    const { images, skipped } = await getImages(message).catch(() => ({ images: [], skipped: 0 }));
+
     // Cronologia: deve iniziare con un messaggio dell'utente
     const history = chats.get(userId) || [];
-    history.push({ role: 'user', content: content.slice(0, 2000) });
+    const userMsg = { role: 'user', content: buildUserText(content, images, skipped), images };
+    history.push(userMsg);
     while (history.length > MAX_HISTORY) history.shift();
     while (history.length && history[0].role !== 'user') history.shift();
 
     try {
       const reply = await askZyra(history);
       if (!reply) throw new Error('Risposta vuota');
+      delete userMsg.images; // le immagini non restano in memoria
+      if (images.length) userMsg.content += ' [immagine allegata]';
       history.push({ role: 'assistant', content: reply });
       chats.set(userId, history);
 
@@ -645,6 +748,7 @@ if (AI_PROVIDER) {
       if (chats.size > 500) chats.delete(chats.keys().next().value);
 
       for (const part of splitMessage(reply)) await message.channel.send(part);
+      await sendInviteIfAsked(message.channel, content);
     } catch (err) {
       console.error('Errore chat DM:', err.message);
       history.pop(); // tolgo l'ultimo messaggio dell'utente, così la cronologia resta valida
@@ -710,14 +814,18 @@ async function handlePublicChat(message, question) {
   const typing = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
   message.channel.sendTyping().catch(() => {});
 
+  const { images, skipped } = await getImages(message).catch(() => ({ images: [], skipped: 0 }));
   const history = chats.get(key) || [];
-  history.push({ role: 'user', content: question.slice(0, 2000) });
+  const userMsg = { role: 'user', content: buildUserText(question, images, skipped), images };
+  history.push(userMsg);
   while (history.length > MAX_HISTORY) history.shift();
   while (history.length && history[0].role !== 'user') history.shift();
 
   try {
     const reply = await askZyra(history, ZYRA_PERSONA + PUBLIC_ADDENDUM);
     if (!reply) throw new Error('Risposta vuota');
+    delete userMsg.images; // le immagini non restano in memoria
+    if (images.length) userMsg.content += ' [immagine allegata]';
     history.push({ role: 'assistant', content: reply });
     chats.set(key, history);
     if (chats.size > 500) chats.delete(chats.keys().next().value);
@@ -725,6 +833,7 @@ async function handlePublicChat(message, question) {
     const parts = splitMessage(reply);
     await message.reply({ content: parts[0], allowedMentions: NO_PINGS });
     for (const part of parts.slice(1)) await message.channel.send({ content: part, allowedMentions: NO_PINGS });
+    await sendInviteIfAsked(message.channel, question);
   } catch (err) {
     console.error('Errore chat pubblica:', err.message);
     history.pop();
@@ -755,7 +864,7 @@ client.on('messageCreate', async (message) => {
 
   // Testo scritto dopo il tag (senza il tag stesso): se c'è, Zyra risponde con l'AI
   const question = message.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
-  if (AI_PROVIDER && question) return handlePublicChat(message, question);
+  if (AI_PROVIDER && (question || imageAttachments(message).length > 0)) return handlePublicChat(message, question);
 
   // Solo il tag, senza testo: risposta a caso tra le frasi qui sopra
   const now = Date.now();
