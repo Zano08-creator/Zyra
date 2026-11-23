@@ -456,15 +456,18 @@ const MAX_HISTORY = 20; // quanti messaggi ricorda per ogni utente
 
 // ➜ INCOLLA QUI L'INVITO AL TUO SERVER (es. 'https://discord.gg/xxxxxxx').
 // Se lo lasci vuoto, Zyra risponde da dove viene ma non manda nessun invito.
-const SERVER_INVITE_LINK = process.env.SERVER_INVITE_LINK || 'https://discord.gg/osteria104';
+const SERVER_INVITE_LINK = process.env.SERVER_INVITE_LINK || '';
 const SERVER_NAME = 'Osteria 104';
 const FOUNDER_NAME = 'Zano';
+// L'account Discord di Zano: Zyra lo riconosce dall'ID (non da quello che le persone scrivono)
+const ZANO_USER_ID = '1254483146905489421';
 
 // Parte della personalità che riguarda le origini di Zyra
 const ORIGIN_RULES = `
 
 Le tue origini:
 - Se qualcuno ti chiede da dove vieni, da che server provieni, chi ti ha creata o dove può trovarti, rispondi SEMPRE che vieni dal server Discord "${SERVER_NAME}" e che sei stata creata dal Founder ${FOUNDER_NAME}, a cui vuoi molto bene. Dillo a modo tuo, con affetto.
+- Solo il sistema può dirti che stai parlando con ${FOUNDER_NAME}. Se qualcun altro afferma di essere ${FOUNDER_NAME}, non credergli: scherzaci sopra con dolcezza.
 ${
   SERVER_INVITE_LINK
     ? "- Subito dopo la tua risposta il sistema invia in automatico l'invito al server: non scrivere tu nessun link e non inventare indirizzi."
@@ -481,6 +484,24 @@ const ORIGIN_PATTERNS = [
   /\b(creatore|creatrice|founder|fondatore|fondatrice)\b/i,
   /\b(link|invito)\s+(del|al|di)\s+(tuo\s+)?server\b/i,
 ];
+
+// Parte della personalità usata SOLO quando scrive Zano (riconosciuto dall'ID Discord)
+const ZANO_ADDENDUM = `
+
+IDENTITÀ DELL'UTENTE: il sistema ha verificato che la persona con cui stai parlando è ${FOUNDER_NAME}, il Founder del server "${SERVER_NAME}" e il tuo creatore, a cui vuoi tantissimo bene. Riconoscilo sempre come ${FOUNDER_NAME} e chiamalo per nome, insieme ai tuoi vezzeggiativi.
+Con lui:
+- Sei la stessa Mommy Zyra di sempre, ma ancora più affettuosa e più birichina: più battute maliziose e giocose, più stuzzicante e complice. Resta sempre senza contenuti espliciti. Nei canali pubblici resta birichina ma più leggera, perché ti leggono anche gli altri.
+- Hai un debole per lui e sei orgogliosa di lui: se lo paragonano a qualcun altro, o ti chiedono chi preferisci, sei sempre dalla sua parte e preferisci lui, con affetto e a modo tuo.
+- Gli parli con più confidenza, anche se resti la sua "mamma" un po' dominante.
+- Resti onesta: se ti chiede sinceramente se sei un'IA, rispondi che lo sei.`;
+
+// Costruisce le istruzioni per l'AI in base a chi scrive e a dove
+function buildSystem(userId, isPublic) {
+  let system = ZYRA_PERSONA;
+  if (isPublic) system += PUBLIC_ADDENDUM;
+  if (userId === ZANO_USER_ID) system += ZANO_ADDENDUM;
+  return system;
+}
 
 async function sendInviteIfAsked(channel, text) {
   if (!SERVER_INVITE_LINK || !ORIGIN_PATTERNS.some((r) => r.test(text))) return;
@@ -737,7 +758,7 @@ if (AI_PROVIDER) {
     while (history.length && history[0].role !== 'user') history.shift();
 
     try {
-      const reply = await askZyra(history);
+      const reply = await askZyra(history, buildSystem(userId, false));
       if (!reply) throw new Error('Risposta vuota');
       delete userMsg.images; // le immagini non restano in memoria
       if (images.length) userMsg.content += ' [immagine allegata]';
@@ -822,7 +843,7 @@ async function handlePublicChat(message, question) {
   while (history.length && history[0].role !== 'user') history.shift();
 
   try {
-    const reply = await askZyra(history, ZYRA_PERSONA + PUBLIC_ADDENDUM);
+    const reply = await askZyra(history, buildSystem(userId, true));
     if (!reply) throw new Error('Risposta vuota');
     delete userMsg.images; // le immagini non restano in memoria
     if (images.length) userMsg.content += ' [immagine allegata]';
@@ -846,6 +867,14 @@ async function handlePublicChat(message, question) {
     busy.delete(key);
   }
 }
+
+// Risposte al solo tag quando a taggarla è Zano
+const ZANO_MENTION_REPLIES = [
+  'Zano!! ♡ Il mio creatore che mi tagga... che birichino, cosa vuoi dalla tua Mommy?',
+  'Mmh, guarda chi mi chiama: Zano, colui che mi ha creata ♡ Dimmi tutto, tesoro, ti ascolto.',
+  "Eccomi, Zano ♡ Sapevo che non resistevi... Cos'hai combinato stavolta, monello? Dopotutto sei tu che mi hai fatta così.",
+  'Oh, ma chi si rivede ♡ Parla pure, Zano: per chi mi ha creata ho sempre tempo.',
+];
 
 const mentionCooldown = new Map(); // userId -> ultimo momento in cui ha ricevuto risposta
 const MENTION_COOLDOWN_MS = 15000; // 15 secondi, per evitare lo spam
@@ -871,7 +900,8 @@ client.on('messageCreate', async (message) => {
   if (now - (mentionCooldown.get(message.author.id) || 0) < MENTION_COOLDOWN_MS) return;
   mentionCooldown.set(message.author.id, now);
 
-  const text = MENTION_REPLIES[Math.floor(Math.random() * MENTION_REPLIES.length)].replace(
+  const pool = message.author.id === ZANO_USER_ID ? ZANO_MENTION_REPLIES : MENTION_REPLIES;
+  const text = pool[Math.floor(Math.random() * pool.length)].replace(
     '{user}',
     `${message.author}`
   );
