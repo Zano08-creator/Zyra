@@ -43,7 +43,7 @@ for (const [name, value] of Object.entries({ TOKEN, CLIENT_ID, STAFF_ROLE_ID }))
 
 // ➜ INCOLLA QUI IL LINK DIRETTO DELLA TUA GIF (es. 'https://i.imgur.com/xxxxxxx.gif')
 // Se lo lasci vuoto ('') il bot prova con il file zyra.gif o con la variabile PANEL_GIF_URL.
-const PANEL_GIF_LINK = '';
+const PANEL_GIF_LINK = 'https://i.imgur.com/5G7lVFg.gif';
 
 // Nome del file GIF del pannello (alternativa al link: mettilo nella stessa cartella di index.js)
 const PANEL_GIF_FILE = 'zyra.gif';
@@ -456,7 +456,7 @@ const MAX_HISTORY = 20; // quanti messaggi ricorda per ogni utente
 
 // ➜ INCOLLA QUI L'INVITO AL TUO SERVER (es. 'https://discord.gg/xxxxxxx').
 // Se lo lasci vuoto, Zyra risponde da dove viene ma non manda nessun invito.
-const SERVER_INVITE_LINK = process.env.SERVER_INVITE_LINK || '';
+const SERVER_INVITE_LINK = process.env.SERVER_INVITE_LINK || 'https://discord.gg/osteria104';
 const SERVER_NAME = 'Osteria 104';
 const FOUNDER_NAME = 'Zano';
 // L'account Discord di Zano: Zyra lo riconosce dall'ID (non da quello che le persone scrivono)
@@ -485,15 +485,10 @@ const ORIGIN_PATTERNS = [
   /\b(link|invito)\s+(del|al|di)\s+(tuo\s+)?server\b/i,
 ];
 
-// Parte della personalità usata SOLO quando scrive Zano (riconosciuto dall'ID Discord)
+// Usata SOLO quando scrive Zano (riconosciuto dall'ID Discord): serve a riconoscerlo, il comportamento resta lo stesso
 const ZANO_ADDENDUM = `
 
-IDENTITÀ DELL'UTENTE: il sistema ha verificato che la persona con cui stai parlando è ${FOUNDER_NAME}, il Founder del server "${SERVER_NAME}" e il tuo creatore, a cui vuoi tantissimo bene. Riconoscilo sempre come ${FOUNDER_NAME} e chiamalo per nome, insieme ai tuoi vezzeggiativi.
-Con lui:
-- Sei la stessa Mommy Zyra di sempre, ma ancora più affettuosa e più birichina: più battute maliziose e giocose, più stuzzicante e complice. Resta sempre senza contenuti espliciti. Nei canali pubblici resta birichina ma più leggera, perché ti leggono anche gli altri.
-- Hai un debole per lui e sei orgogliosa di lui: se lo paragonano a qualcun altro, o ti chiedono chi preferisci, sei sempre dalla sua parte e preferisci lui, con affetto e a modo tuo.
-- Gli parli con più confidenza, anche se resti la sua "mamma" un po' dominante.
-- Resti onesta: se ti chiede sinceramente se sei un'IA, rispondi che lo sei.`;
+IDENTITÀ DELL'UTENTE: il sistema ha verificato che la persona con cui stai parlando è ${FOUNDER_NAME}, il Founder del server "${SERVER_NAME}" e il tuo creatore, a cui vuoi bene. Riconoscilo come ${FOUNDER_NAME} e chiamalo per nome quando ti viene naturale. Per il resto comportati esattamente come fai con tutti gli altri: stesso tono, stesso carattere e stessa personalità, senza essere più appiccicosa, più affettuosa o più birichina del solito.`;
 
 // Costruisce le istruzioni per l'AI in base a chi scrive e a dove
 function buildSystem(userId, isPublic) {
@@ -870,10 +865,10 @@ async function handlePublicChat(message, question) {
 
 // Risposte al solo tag quando a taggarla è Zano
 const ZANO_MENTION_REPLIES = [
-  'Zano!! ♡ Il mio creatore che mi tagga... che birichino, cosa vuoi dalla tua Mommy?',
-  'Mmh, guarda chi mi chiama: Zano, colui che mi ha creata ♡ Dimmi tutto, tesoro, ti ascolto.',
-  "Eccomi, Zano ♡ Sapevo che non resistevi... Cos'hai combinato stavolta, monello? Dopotutto sei tu che mi hai fatta così.",
-  'Oh, ma chi si rivede ♡ Parla pure, Zano: per chi mi ha creata ho sempre tempo.',
+  'Ciao Zano ♡ Il mio creatore mi tagga... cosa ti serve?',
+  'Eccomi, Zano ♡ Dimmi tutto, ti ascolto.',
+  'Zano! Che birichino che mi tagghi ♡ Cosa vuoi dalla tua Mommy?',
+  'Oh, Zano ♡ Chi mi ha creata mi cerca... parla pure.',
 ];
 
 const mentionCooldown = new Map(); // userId -> ultimo momento in cui ha ricevuto risposta
@@ -906,6 +901,91 @@ client.on('messageCreate', async (message) => {
     `${message.author}`
   );
   await message.reply({ content: text, allowedMentions: { repliedUser: false } }).catch(() => {});
+});
+
+// ───────────────────────── ANNIVERSARIO DI OSTERIA ─────────────────────────
+// Ogni 15 novembre, dal 2027 in poi, Zyra tagga @everyone nel canale indicato.
+const ANNIVERSARY_CHANNEL_ID = '1459205819735478415';
+const ANNIVERSARY_FIRST_YEAR = 2027; // primo anno in cui parte
+const ANNIVERSARY_MONTH = 11; // novembre
+const ANNIVERSARY_DAY = 15;
+const ANNIVERSARY_HOUR = 0; // ora italiana: 0 = mezzanotte, 9 = le nove del mattino, ecc.
+const ANNIVERSARY_TZ = 'Europe/Rome';
+const ANNIVERSARY_TEXT = '@everyone Buon Anniversario di Osteria! 🎉♡';
+
+let lastAnnouncedYear = 0; // evita doppi invii mentre il bot resta acceso
+
+// Data e ora attuali in Italia
+function romeNow() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: ANNIVERSARY_TZ,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type) => Number(parts.find((p) => p.type === type).value);
+  return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour') % 24 };
+}
+
+function isAnniversaryTime(t) {
+  return (
+    t.year >= ANNIVERSARY_FIRST_YEAR &&
+    t.month === ANNIVERSARY_MONTH &&
+    t.day === ANNIVERSARY_DAY &&
+    t.hour >= ANNIVERSARY_HOUR
+  );
+}
+
+async function checkAnniversary() {
+  try {
+    const t = romeNow();
+    if (!isAnniversaryTime(t) || lastAnnouncedYear === t.year) return;
+
+    const channel = await client.channels.fetch(ANNIVERSARY_CHANNEL_ID).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      console.error('🎉 Anniversario: canale non trovato o non accessibile');
+      return;
+    }
+
+    // Se Render riavvia il bot lo stesso giorno, controllo di non aver già mandato il messaggio
+    const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    const alreadySent = recent?.some(
+      (m) =>
+        m.author.id === client.user.id &&
+        m.content.includes('Buon Anniversario di Osteria') &&
+        new Date(m.createdTimestamp).getUTCFullYear() === t.year
+    );
+    lastAnnouncedYear = t.year;
+    if (alreadySent) return;
+
+    await channel.send({ content: ANNIVERSARY_TEXT, allowedMentions: { parse: ['everyone'] } });
+    console.log(`🎉 Messaggio di anniversario inviato (${t.year})`);
+  } catch (err) {
+    console.error('Errore anniversario:', err.message);
+  }
+}
+
+client.once('ready', async () => {
+  checkAnniversary();
+  setInterval(checkAnniversary, 60 * 1000); // controlla ogni minuto
+
+  // Prova opzionale: con la variabile ANNIVERSARY_TEST=true invia un messaggio di prova (senza @everyone)
+  if (process.env.ANNIVERSARY_TEST === 'true') {
+    const channel = await client.channels.fetch(ANNIVERSARY_CHANNEL_ID).catch(() => null);
+    if (channel?.isTextBased()) {
+      await channel
+        .send({
+          content: '🧪 Prova dell\'anniversario: il 15 novembre scriverò qui "Buon Anniversario di Osteria!" con @everyone. (Questo è solo un test, nessun tag.)',
+          allowedMentions: { parse: [] },
+        })
+        .then(() => console.log('🧪 Messaggio di prova inviato'))
+        .catch((e) => console.error('🧪 Prova fallita (permessi?):', e.message));
+    } else {
+      console.error('🧪 Prova fallita: canale non trovato');
+    }
+  }
 });
 
 // ───────────────────────── SICUREZZA ANTI-CRASH ─────────────────────────
