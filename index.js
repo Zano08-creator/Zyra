@@ -207,7 +207,7 @@ async function handleCommand(interaction) {
 
   if (commandName === 'setup') {
     const embed = new EmbedBuilder()
-      .setTitle('🎫 Ticket di Zyra. ♡')
+      .setTitle('🎫 Benvenuto nel pannello di Zyra. ♡')
       .setDescription(
         'Benvenuto nel pannello di Zyra. ♡\n' +
           'Hai bisogno di aiuto? Non preoccuparti, ci sono io.\n' +
@@ -900,6 +900,48 @@ client.on('messageCreate', async (message) => {
     `${message.author}`
   );
   await message.reply({ content: text, allowedMentions: { repliedUser: false } }).catch(() => {});
+});
+
+// ───────────────────────── RISPOSTE AUTOMATICHE A PAROLE CHIAVE ─────────────────────────
+// Quando qualcuno scrive una di queste parole in un canale del server, Zyra risponde con una
+// delle frasi della lista (se ce ne sono più di una, ne sceglie una a caso).
+// ➜ Scrivi tu cosa deve dire: aggiungi le frasi dentro "replies", tra apici e separate da una virgola.
+// Finché "replies" è vuota, Zyra non fa nulla.
+const KEYWORD_REPLIES = [
+  {
+    words: ['pistolesi'],
+    replies: [
+      // 'Scrivi qui la frase che Zyra deve dire',
+    ],
+  },
+  // Per aggiungere un'altra parola, copia il blocco qui sopra e cambia "words" e "replies".
+];
+const KEYWORD_COOLDOWN_MS = 5000; // pausa minima tra due risposte nello stesso canale (0 = sempre)
+const keywordCooldown = new Map(); // `${canale}:${parola}` -> ultimo invio
+
+const keywordRules = KEYWORD_REPLIES.map((rule) => ({
+  ...rule,
+  regex: new RegExp(`\\b(${rule.words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i'),
+}));
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot || !message.guild || !message.content) return;
+  if (isTicketChannel(message.channel)) return;
+  // Se hanno taggato Zyra risponde già la chat con l'AI: niente doppia risposta
+  if (message.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true })) return;
+
+  for (const rule of keywordRules) {
+    if (!rule.replies.length || !rule.regex.test(message.content)) continue;
+
+    const key = `${message.channel.id}:${rule.words[0]}`;
+    const now = Date.now();
+    if (now - (keywordCooldown.get(key) || 0) < KEYWORD_COOLDOWN_MS) return;
+    keywordCooldown.set(key, now);
+
+    const text = rule.replies[Math.floor(Math.random() * rule.replies.length)];
+    await message.reply({ content: text, allowedMentions: { parse: [], repliedUser: false } }).catch(() => {});
+    return; // una sola risposta per messaggio
+  }
 });
 
 // ───────────────────────── ANNIVERSARIO DI OSTERIA ─────────────────────────
